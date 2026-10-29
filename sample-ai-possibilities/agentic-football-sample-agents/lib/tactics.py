@@ -22,6 +22,7 @@ import math
 from state import (
     _is_my_team,
     _player_idx,
+    _resolve_holder,
     dist,
     get_goal_positions,
     get_possession_info,
@@ -33,6 +34,22 @@ LANE_RADIUS = 4.0
 SHOOT_QUALITY_THRESHOLD = 0.45
 CLOSE_RANGE = 14.0
 UNDER_PRESSURE = 5.0
+
+# Deepest each position drops when defending, as distance from our goal line.
+# FWD1 plays as the futsal pivot: it holds the halfway line as the first line
+# of defence and the outlet for the counter-attack. FWD2 plays as the right
+# ala: it tracks back to the edge of our box.
+DROP_LIMIT = {"FWD1": 55.0, "FWD2": 20.0}
+DEFAULT_DROP_LIMIT = 15.0
+PIVOT_DEPTH = 18.0
+
+# Wide players and their side of the pitch (+y matches FWD2_CONFIG in fallback.py).
+WING_SIDE = {"FWD2": 1.0}
+ALA_DEPTH = 28.0
+ALA_WIDTH = 14.0
+TUCK_IN_Y = 3.0
+COUNTER_PRESS_SECONDS = 3.0
+COUNTER_PRESS_RANGE = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -172,17 +189,97 @@ def best_pass(me: dict, mine: list, opps: list, opp_goal_x: float,
 # Off-ball positioning
 # ---------------------------------------------------------------------------
 
-def open_space(me_pos: dict, opps: list, opp_goal_x: float, attacking: bool) -> dict:
-    """The candidate spot near me that is furthest from any opponent."""
+def open_space(me_pos: dict, opps: list, opp_goal_x: float, attacking: bool,
+               anchor: dict | None = None) -> dict:
+    """The candidate spot furthest from any opponent, around `anchor` or ahead of me."""
     direction = 1.0 if opp_goal_x > 0 else -1.0
-    step = 10.0 if attacking else 0.0
+    if anchor is None:
+        step = 10.0 if attacking else 0.0
+        anchor = {"x": me_pos["x"] + direction * step, "y": me_pos["y"]}
     candidates = [
-        {"x": max(-50.0, min(50.0, me_pos["x"] + direction * step + dx)),
-         "y": max(-30.0, min(30.0, me_pos["y"] + dy))}
+        {"x": max(-50.0, min(50.0, anchor["x"] + dx)),
+         "y": max(-30.0, min(30.0, anchor["y"] + dy))}
         for dx in (-5.0, 0.0, 5.0)
         for dy in (-10.0, 0.0, 10.0)
     ]
     return max(candidates, key=lambda c: _nearest_distance(c, opps))
+
+
+def pivot_anchor(me_pos: dict, opp_goal_x: float) -> dict:
+    """The pivot's attacking reference point: high and central, PIVOT_DEPTH from goal."""
+    direction = 1.0 if opp_goal_x > 0 else -1.0
+    return {"x": opp_goal_x - direction * PIVOT_DEPTH, "y": max(-10.0, min(10.0, me_pos["y"]))}
+
+
+def ala_anchor(opp_goal_x: float, side: float) -> dict:
+    """The ala's attacking reference point: wide on its side, behind the pivot."""
+    direction = 1.0 if opp_goal_x > 0 else -1.0
+    return {"x": opp_goal_x - direction * ALA_DEPTH, "y": side * ALA_WIDTH}
+
+
+def ala_recovery(ball_pos: dict, my_goal_x: float, side: float,
+                 drop_limit: float) -> tuple[dict, bool]:
+    """(recovery spot, is_weak_side) for a wide player.
+
+    Ball on the ala's side: cover the wing. Ball on the far side: tuck in
+    toward the centre to cover behind the pressing player, rather than
+    staying glued to an opponent out wide.
+    """
+    rec = recovery_position(ball_pos, my_goal_x, drop_limit)
+    weak_side = ball_pos["y"] * side < 0
+    if weak_side:
+        rec["y"] = side * TUCK_IN_Y
+    else:
+        rec["y"] = side * max(TUCK_IN_Y, min(20.0, abs(ball_pos["y"]) * 0.7))
+    return rec, weak_side
+
+
+def recovery_position(ball_pos: dict, my_goal_x: float,
+                      drop_limit: float = DEFAULT_DROP_LIMIT) -> dict:
+    """A spot goal-side of the ball, a third of the way back toward our goal.
+
+    Never deeper than `drop_limit` from our goal line: by default that keeps
+    the player out of our own box (left to DEF and GK); the pivot uses the
+    halfway line instead.
+    """
+    x = ball_pos["x"] + (my_goal_x - ball_pos["x"]) * 0.35
+    direction = 1.0 if my_goal_x < 0 else -1.0
+    x = direction * max(direction * x, direction * (my_goal_x + direction * drop_limit))
+    return {"x": x, "y": max(-20.0, min(20.0, ball_pos["y"] * 0.5))}
+
+
+def opponent_to_mark(me_pos: dict, opps: list, carrier, max_distance: float = 30.0):
+    """Nearest opponent to me other than the ball carrier, or None if all are far."""
+    candidates = [o for o in opps if o is not carrier]
+    if not candidates:
+        return None
+    target = min(candidates, key=lambda o: dist(me_pos, _xy(o)))
+    return target if dist(me_pos, _xy(target)) <= max_distance else None
+
+
+# ---------------------------------------------------------------------------
+# Possession memory (for the counter-press)
+# ---------------------------------------------------------------------------
+
+# gameTime at which each team last had the ball. Kept in the agent process
+# because stateless agents have no conversation history to remember it.
+_last_possession: dict[int, float] = {}
+
+
+def note_possession(game_state: dict, team_id: int, we_have_ball: bool):
+    """Record possession; return seconds since we lost the ball, or None."""
+    t = game_state.get("gameTime")
+    if not isinstance(t, (int, float)):
+        return None
+    last = _last_possession.get(team_id)
+    if last is not None and t < last:
+        # Clock went backwards: a new match started in this process.
+        _last_possession.pop(team_id, None)
+        last = None
+    if we_have_ball:
+        _last_possession[team_id] = t
+        return None
+    return None if last is None else t - last
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +325,7 @@ def fast_path(game_state: dict, team_id: int, my_player_id: int, position_label:
     if me is None or not holder_is_me(ball, players, team_id, my_player_id):
         return None
 
+    note_possession(game_state, team_id, True)
     me_pos = _xy(me)
 
     if position_label == "GK":
@@ -269,6 +367,9 @@ def tactical_insights(game_state: dict, team_id: int, my_player_id: int, positio
 
     me_pos = _xy(me)
     _, _, we_have_ball = get_possession_info(ball, players, team_id)
+    since_lost = note_possession(game_state, team_id, we_have_ball)
+    is_pivot = position_label == "FWD1"
+    wing_side = WING_SIDE.get(position_label)
 
     if holder_is_me(ball, players, team_id, my_player_id):
         quality = shot_quality(me_pos, opp_goal_x, keeper, opps)
@@ -280,7 +381,13 @@ def tactical_insights(game_state: dict, team_id: int, my_player_id: int, positio
         if target is not None:
             lines.append(f"  Best pass: player {target[0]} type={target[1]} (score {target[2]:+.2f}).")
     elif we_have_ball:
-        spot = open_space(me_pos, opps, opp_goal_x, attacking=position_label in ("MID", "FWD1", "FWD2"))
+        anchor = None
+        if is_pivot:
+            anchor = pivot_anchor(me_pos, opp_goal_x)
+        elif wing_side is not None:
+            anchor = ala_anchor(opp_goal_x, wing_side)
+        spot = open_space(me_pos, opps, opp_goal_x,
+                          attacking=position_label in ("MID", "FWD1", "FWD2"), anchor=anchor)
         lines.append(f"  Teammate has the ball. Open space to receive: "
                      f"({spot['x']:.1f}, {spot['y']:.1f}).")
     else:
@@ -290,9 +397,34 @@ def tactical_insights(game_state: dict, team_id: int, my_player_id: int, positio
             danger = min(opps, key=lambda p: abs(_xy(p)["x"] - my_goal_x))
             lines.append(f"  Most dangerous opponent: P{_player_idx(danger)} "
                          f"({abs(_xy(danger)['x'] - my_goal_x):.1f} from our goal).")
+        in_our_half = abs(ball_pos["x"] - my_goal_x) < 55.0
+        lines.append(f"  We do NOT have the ball. Ball is in {'OUR' if in_our_half else 'THEIR'} half.")
+        ball_dist = dist(me_pos, ball_pos)
+        if (since_lost is not None and since_lost <= COUNTER_PRESS_SECONDS
+                and ball_dist <= COUNTER_PRESS_RANGE):
+            lines.append(f"  JUST LOST the ball {since_lost:.1f}s ago and it is {ball_dist:.1f} from you: "
+                         "COUNTER-PRESS now.")
         if i_am_closest:
             lines.append("  You are OUR CLOSEST player to the ball: PRESS_BALL or INTERCEPT.")
         else:
-            lines.append("  A teammate is closer to the ball: hold shape or MARK, do not chase.")
+            lines.append("  A teammate is closer to the ball: do not chase it.")
+            drop_limit = DROP_LIMIT.get(position_label)
+            if wing_side is not None:
+                rec, weak_side = ala_recovery(ball_pos, my_goal_x, wing_side,
+                                              drop_limit or DEFAULT_DROP_LIMIT)
+                lines.append(f"  Ball is on the {'FAR' if weak_side else 'YOUR'} side: "
+                             f"{'tuck in toward the centre to cover' if weak_side else 'cover the wing'}.")
+            else:
+                rec = recovery_position(ball_pos, my_goal_x, drop_limit or DEFAULT_DROP_LIMIT)
+            lines.append(f"  Recovery position (goal-side of the ball): ({rec['x']:.1f}, {rec['y']:.1f}).")
+            carrier = _resolve_holder(ball, players)
+            markable = opps
+            if drop_limit is not None:
+                # Beyond its drop limit a player is not expected to follow anyone.
+                markable = [o for o in opps if abs(_xy(o)["x"] - my_goal_x) >= drop_limit]
+            target = opponent_to_mark(me_pos, markable, carrier)
+            if target is not None:
+                lines.append(f"  Opponent to mark: P{_player_idx(target)} "
+                             f"({dist(me_pos, _xy(target)):.1f} from you).")
 
     return "\n".join(lines)

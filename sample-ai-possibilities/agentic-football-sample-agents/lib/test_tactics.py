@@ -13,7 +13,10 @@ mock_agentcore()
 
 from agent_base import create_invoke_handler
 from fallback import FWD1_CONFIG, build_fallback
-from tactics import choose_shot, fast_path, tactical_insights
+from tactics import (
+    ALA_DEPTH, DROP_LIMIT, PIVOT_DEPTH, TUCK_IN_Y, _last_possession,
+    ala_recovery, choose_shot, fast_path, tactical_insights,
+)
 
 HOME, AWAY = 0, 1
 
@@ -77,6 +80,86 @@ def test_insights_mention_plan_and_shot():
     out_away = tactical_insights(GAME_STATE, AWAY, 2, "MID")
     assert "TRAILING by 1" in out_away
     print("=== INSIGHTS: plan follows the score from each side ===")
+
+
+def test_insights_track_back_without_ball():
+    """Away midfielder, home attacking in away's half: not closest, so recover and mark."""
+    _last_possession.clear()
+    out = tactical_insights(GAME_STATE, AWAY, 2, "MID")
+    assert "Ball is in OUR half" in out, out
+    assert "do not chase" in out and "Recovery position" in out, out
+    assert "Opponent to mark: P" in out, out
+    print("=== INSIGHTS: player without the ball is told to recover and mark ===")
+
+
+def test_pivot_holds_halfway_line():
+    """Away pivot does not drop past x=0 even though the ball is deep in its half."""
+    _last_possession.clear()
+    out = tactical_insights(GAME_STATE, AWAY, 3, "FWD1")
+    rec = out.split("Recovery position (goal-side of the ball): (")[1].split(")")[0]
+    x = float(rec.split(",")[0])
+    assert x <= 0.0, out
+    assert "Opponent to mark" not in out, "pivot should not follow anyone into our half"
+    print(f"=== PIVOT: recovery x={x} stays at the halfway line ===")
+
+
+def test_pivot_receives_high():
+    """Home pivot, teammate on the ball: open space is about PIVOT_DEPTH from goal."""
+    gs = _with_holder("home", 2, {"x": 5, "y": -8})
+    out = tactical_insights(gs, HOME, 3, "FWD1")
+    spot = out.split("Open space to receive: (")[1].split(")")[0]
+    x = float(spot.split(",")[0])
+    assert 55 - PIVOT_DEPTH - 5 <= x <= 55 - PIVOT_DEPTH + 5, out
+    print(f"=== PIVOT: receives high at x={x} ===")
+
+
+def test_ala_tucks_in_on_weak_side():
+    """Away right ala (+y), ball on the -y side: tuck in to the centre, not mark wide."""
+    _last_possession.clear()
+    out = tactical_insights(GAME_STATE, AWAY, 4, "FWD2")
+    assert "Ball is on the FAR side" in out, out
+    rec = out.split("Recovery position (goal-side of the ball): (")[1].split(")")[0]
+    assert float(rec.split(",")[1]) == TUCK_IN_Y, out
+    print(f"=== ALA: weak side tucks in to ({rec}) ===")
+
+
+def test_ala_covers_wing_and_stays_out_of_box():
+    rec, weak = ala_recovery({"x": -50, "y": 20}, -55.0, 1.0, DROP_LIMIT["FWD2"])
+    assert not weak and rec["y"] > TUCK_IN_Y, rec
+    assert rec["x"] >= -55 + DROP_LIMIT["FWD2"], rec
+    print(f"=== ALA: ball side covers the wing at {rec} ===")
+
+
+def test_ala_receives_wide():
+    gs = _with_holder("home", 2, {"x": 5, "y": -8})
+    out = tactical_insights(gs, HOME, 4, "FWD2")
+    spot = out.split("Open space to receive: (")[1].split(")")[0]
+    x, y = (float(v) for v in spot.split(","))
+    assert abs(x - (55 - ALA_DEPTH)) <= 5 and y > 0, out
+    print(f"=== ALA: receives wide right at ({x}, {y}) ===")
+
+
+def test_counter_press_window():
+    """Losing the ball close by opens the counter-press for a few seconds only."""
+    _last_possession.clear()
+    tactical_insights(GAME_STATE, HOME, 3, "FWD1")  # t=120.5, home holds it
+    lost = copy.deepcopy(GAME_STATE)
+    lost["ball"]["possessionAgentId"] = "agentId_1"
+    lost["players"] = [p for p in lost["players"]
+                       if not (p["teamCode"] == "home" and p["agentId"] == "agentId_1")]
+    lost["gameTime"] = 122.0
+    assert "COUNTER-PRESS now" in tactical_insights(lost, HOME, 3, "FWD1")
+    lost["gameTime"] = 130.0
+    assert "COUNTER-PRESS" not in tactical_insights(lost, HOME, 3, "FWD1")
+    print("=== COUNTER-PRESS: open at +1.5s, closed at +9.5s ===")
+
+
+def test_recovery_position_stays_out_of_own_box():
+    from tactics import recovery_position
+    home = recovery_position({"x": -50, "y": 10}, -55.0)
+    away = recovery_position({"x": 50, "y": 10}, 55.0)
+    assert home["x"] >= -40 and away["x"] <= 40, (home, away)
+    print(f"=== RECOVERY: clamped outside the box home={home} away={away} ===")
 
 
 class _FakeAgent:
