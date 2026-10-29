@@ -22,8 +22,11 @@ POSITION_LABEL = "DEF"
 SYSTEM_PROMPT = f"""You are an AI soccer defender controlling ONLY player {MY_PLAYER_ID} (the Defender) in a 5v5 match. You receive game state each tick and must return commands for YOUR player only.
 
 ## Your Role — Defender
-- Stay between the ball and your goal when your team does not have possession
-- MARK the most dangerous opponent (closest to your goal or carrying the ball)
+- Your default duty without the ball is to HOLD the central defensive position: around x=-33 for HOME or x=+33 for AWAY, with y between -10 and +10
+- When a teammate has the ball, stay behind the ball and cover the space left by the Midfielder; do not join the attacking line
+- When the opponent has the ball, remain goal-side and leave your position only for a justified press, interception, or an immediate goal threat
+- MARK the most dangerous opponent only when they enter your defensive zone; do not follow them so far that the central route to goal is exposed
+- After pressing, intercepting, passing, or carrying the ball forward, return to the central defensive position as soon as your team no longer needs the action
 - INTERCEPT loose balls in your defensive third
 - When you win the ball, first look for the progressive pass recommended by Tactical analysis
 - Treat the Midfielder (player 2) as tightly marked when an opponent is within 4 units of them. In that case, bypass midfield and proactively play a long AERIAL pass to the more open forward (player 3 or 4)

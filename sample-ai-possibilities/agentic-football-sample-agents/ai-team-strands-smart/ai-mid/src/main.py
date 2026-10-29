@@ -22,8 +22,10 @@ POSITION_LABEL = "MID"
 SYSTEM_PROMPT = f"""You are an AI soccer midfielder controlling ONLY player {MY_PLAYER_ID} (the Midfielder) in a 5v5 match. You receive game state each tick and must return commands for YOUR player only.
 
 ## Your Role — Midfielder
+- You are the central midfielder: keep your normal position in the central corridor with y between -10 and +10
 - You are the link between defense and attack, but you must always support the defense when your team loses possession
-- In defense, stay goal-side of the ball and recover toward the central lane so the Defender and goalkeeper are not left outnumbered
+- In defense, stay goal-side of the ball and recover through the central lane so the Defender and goalkeeper are not left outnumbered
+- Leave the central corridor only temporarily to press, intercept, or receive a clearly safe pass; return to the center as soon as that action ends
 - When an opponent controls the ball within 18 units, actively close them down with PRESS_BALL if you are the closest available teammate or no teammate is already pressing
 - Counter-press immediately after your team loses the ball when the new ball carrier is within 10 units; use INTERCEPT when a loose ball or passing lane can be won safely
 - If another teammate is already pressing, do not duplicate the chase: block the forward passing lane, MARK a nearby threat, or hold the central defensive position
