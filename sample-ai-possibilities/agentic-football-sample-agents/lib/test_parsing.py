@@ -34,6 +34,23 @@ def test_python_boolean_is_recovered():
     print()
 
 
+def test_flat_parameters_are_lifted():
+    print("=== FLAT PARAMETERS ===")
+    # Verbatim Nova Micro output observed for the FWD1 prompt.
+    text = '[{"commandType":"MOVE_TO","target_x":0.0,"target_y":-2.6,"sprint":false}]\n'
+    cmds = parse_commands(text, TEAM_ID, MY_PLAYER_ID)
+    assert len(cmds) == 1, "FAIL: the command was dropped"
+    assert cmds[0]["parameters"] == {"target_x": 0.0, "target_y": -2.6, "sprint": False}, cmds[0]
+    assert "target_x" not in cmds[0], "FAIL: flat key left at the top level"
+    print(f"  lifted:      {cmds[0]}")
+
+    nested_wins = '[{"commandType":"PASS","target_player_id":2,"parameters":{"target_player_id":4,"type":"GROUND"}}]'
+    cmds = parse_commands(nested_wins, TEAM_ID, MY_PLAYER_ID)
+    assert cmds[0]["parameters"] == {"target_player_id": 4, "type": "GROUND"}, cmds[0]
+    print("  nested value wins over a conflicting flat one")
+    print()
+
+
 def test_recovery_is_reported():
     print("=== RECOVERY CALLBACK ===")
     seen = []

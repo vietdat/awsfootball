@@ -1,6 +1,6 @@
 """
 AI Soccer Goalkeeper Agent — Controls ONLY player 0 (Goalkeeper).
-Uses Strands SDK + Amazon Nova Micro.
+Uses Strands SDK + Amazon Nova 2 Lite.
 """
 
 import os, sys; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib")); sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "lib"))
@@ -97,7 +97,7 @@ fallback_commands = build_fallback(SMART_GK_CONFIG)
 
 # --- Wire it up ---
 
-agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-micro-v1:0")
+agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-2-lite-v1:0")
 create_invoke_handler(
     app, agent, MY_PLAYER_ID, POSITION_LABEL, fallback_commands,
     fallback_cfg=SMART_GK_CONFIG,

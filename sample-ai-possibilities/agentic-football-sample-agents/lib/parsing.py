@@ -94,6 +94,30 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+_ENVELOPE_KEYS = {"commandType", "playerId", "teamId", "parameters", "duration"}
+
+
+def _lift_flat_parameters(cmd: dict) -> None:
+    """Move parameters the model wrote at the top level into cmd["parameters"].
+
+    Small models (Nova Micro in particular) often answer
+    {"commandType":"MOVE_TO","target_x":0,"target_y":-2.6,"sprint":false}
+    instead of nesting them under "parameters". Left as-is, the command parses
+    and is sent, but carries no parameters — the player silently does nothing.
+    Keys already present in "parameters" win over flat ones.
+    """
+    flat = {k: v for k, v in cmd.items() if k not in _ENVELOPE_KEYS}
+    if not flat:
+        return
+    params = cmd.get("parameters")
+    if not isinstance(params, dict):
+        params = {}
+    for k, v in flat.items():
+        params.setdefault(k, v)
+        del cmd[k]
+    cmd["parameters"] = params
+
+
 def _tag_commands(commands: list, team_id: int, my_player_id: int) -> list[dict]:
     """Add teamId and playerId to each command, filtering to valid ones."""
     result = []
@@ -103,6 +127,7 @@ def _tag_commands(commands: list, team_id: int, my_player_id: int) -> list[dict]
         # on to the real command array.
         if not isinstance(cmd, dict):
             continue
+        _lift_flat_parameters(cmd)
         cmd["teamId"] = team_id
         cmd["playerId"] = my_player_id
         if "commandType" in cmd:

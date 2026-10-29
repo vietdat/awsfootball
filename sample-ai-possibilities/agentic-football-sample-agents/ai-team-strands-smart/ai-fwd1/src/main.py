@@ -1,10 +1,12 @@
 """
 AI Soccer Forward 1 Agent — Controls ONLY player 3, playing as the futsal pivot.
-Uses Strands SDK + Amazon Nova Micro.
+Uses Strands SDK + Meta Llama 4 Scout.
 """
 
 import os, sys; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib")); sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "lib"))
 from _bootstrap import setup_lib_path; setup_lib_path(__file__)
+
+from dataclasses import replace
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from agent_base import create_agent, create_invoke_handler
@@ -27,9 +29,11 @@ at the halfway line. Your teammates (two wide players and a fixo) do the deep de
 
 ## Decision priority (follow in order)
 1. You have the ball (hasBall=True):
-   - Shot quality >= 0.45 → SHOOT with the recommended aim and power.
-   - Else if a "Best pass" is listed with score > 0 → PASS to that player (lay it off to a teammate running forward).
-   - Else → MOVE_TO toward the opponent goal (turn and drive), sprint=true.
+   - "LONG SHOT: YES" or shot quality >= 0.45 → SHOOT with the recommended aim and power. You shoot from distance.
+   - "LONG SHOT: not yet (out of range / angle too wide)" → MOVE_TO toward the opponent goal centre to get into
+     shooting range, sprint=true; only PASS instead if an opponent is within 3 units.
+   - "LONG SHOT: not yet (shooting lane blocked)" → PASS to the "Best pass" if its score > 0, else MOVE_TO sideways
+     (y ± 6) to open a new shooting lane.
 2. A teammate has the ball → MOVE_TO the "Open space to receive" point: stay high, about 18 units from
    the opponent goal, so teammates always have a forward pass. Sprint only if stam > 0.3.
 3. We do NOT have the ball:
@@ -60,15 +64,16 @@ Example: [{{"commandType":"MARK","playerId":{MY_PLAYER_ID},"parameters":{{"targe
 
 # --- Fallback ---
 
-fallback_commands = build_fallback(FWD1_CONFIG)
+FALLBACK_CFG = replace(FWD1_CONFIG, press_only_if_closest=True)
+fallback_commands = build_fallback(FALLBACK_CFG)
 
 
 # --- Wire it up ---
 
-agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-micro-v1:0")
+agent = create_agent(SYSTEM_PROMPT, model_id="us.meta.llama4-scout-17b-instruct-v1:0")
 create_invoke_handler(
     app, agent, MY_PLAYER_ID, POSITION_LABEL, fallback_commands,
-    fallback_cfg=FWD1_CONFIG,
+    fallback_cfg=FALLBACK_CFG,
     fast_path_fn=fast_path, context_fn=tactical_insights, stateless=True,
 )
 

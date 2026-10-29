@@ -120,6 +120,7 @@ def test_ala_tucks_in_on_weak_side():
     assert "Ball is on the FAR side" in out, out
     rec = out.split("Recovery position (goal-side of the ball): (")[1].split(")")[0]
     assert float(rec.split(",")[1]) == TUCK_IN_Y, out
+    assert "Opponent to mark" not in out, "weak-side ala should cover space, not a man"
     print(f"=== ALA: weak side tucks in to ({rec}) ===")
 
 
@@ -152,6 +153,74 @@ def test_counter_press_window():
     lost["gameTime"] = 130.0
     assert "COUNTER-PRESS" not in tactical_insights(lost, HOME, 3, "FWD1")
     print("=== COUNTER-PRESS: open at +1.5s, closed at +9.5s ===")
+
+
+def _spot(out: str, key: str):
+    if key + ": (" not in out:
+        return None
+    x, y = out.split(key + ": (")[1].split(")")[0].split(",")
+    return float(x), float(y)
+
+
+def _place(gs: dict, team_code: str, idx: int, pos: dict) -> None:
+    for p in gs["players"]:
+        if p["teamCode"] == team_code and p["agentId"] == f"agentId_{idx}":
+            p["position"] = dict(pos)
+
+
+def test_forwards_keep_apart():
+    """Pivot and ala never get target spots closer than 10 units, attacking or defending."""
+    worst = 99.0
+    for team, code, opp_code in ((HOME, "home", "away"), (AWAY, "away", "home")):
+        for bx in range(-45, 50, 10):
+            for by in (-25, -10, -3, 0, 3, 10, 25):
+                ball = {"x": bx, "y": by}
+                for holder_code, key in ((opp_code, "Recovery position (goal-side of the ball)"),
+                                         (code, "Open space to receive")):
+                    gs = _with_holder(holder_code, 2, ball)
+                    # Both forwards stand side by side, away from the ball.
+                    _place(gs, code, 3, {"x": bx + 12, "y": by + 1})
+                    _place(gs, code, 4, {"x": bx + 12, "y": by - 1})
+                    _place(gs, code, 2, ball if holder_code == code else {"x": bx - 3, "y": by})
+                    _last_possession.clear()
+                    s1 = _spot(tactical_insights(gs, team, 3, "FWD1"), key)
+                    s2 = _spot(tactical_insights(gs, team, 4, "FWD2"), key)
+                    if s1 and s2:
+                        gap = ((s1[0] - s2[0]) ** 2 + (s1[1] - s2[1]) ** 2) ** 0.5
+                        assert gap >= 10, (team, ball, key, s1, s2)
+                        worst = min(worst, gap)
+    print(f"=== FORWARDS: smallest gap between pivot and ala targets = {worst:.1f} ===")
+
+
+def test_only_closest_counter_presses():
+    """Both forwards near the lost ball: only the nearer one is told to counter-press."""
+    _last_possession.clear()
+    _last_possession[HOME] = GAME_STATE["gameTime"] - 1.0
+    gs = _with_holder("away", 2, {"x": 20, "y": 0})
+    _place(gs, "home", 3, {"x": 24, "y": 2})
+    _place(gs, "home", 4, {"x": 27, "y": -2})
+    _place(gs, "home", 2, {"x": 0, "y": 0})
+    fwd1 = tactical_insights(gs, HOME, 3, "FWD1")
+    _last_possession[HOME] = GAME_STATE["gameTime"] - 1.0
+    fwd2 = tactical_insights(gs, HOME, 4, "FWD2")
+    assert "COUNTER-PRESS" in fwd1 and "COUNTER-PRESS" not in fwd2, (fwd1, fwd2)
+    assert "do not chase" in fwd2
+    print("=== COUNTER-PRESS: one presser, the other recovers ===")
+
+
+def test_fallback_press_only_if_closest():
+    from dataclasses import replace
+    from fallback import FWD2_CONFIG
+    gs = _with_holder("away", 2, {"x": 20, "y": 0})
+    _place(gs, "home", 3, {"x": 24, "y": 2})
+    _place(gs, "home", 4, {"x": 27, "y": -2})
+    one = build_fallback(replace(FWD1_CONFIG, press_only_if_closest=True))(gs, HOME, 3)
+    two = build_fallback(replace(FWD2_CONFIG, press_only_if_closest=True))(gs, HOME, 4)
+    assert one[0]["commandType"] == "PRESS_BALL", one
+    assert two[0]["commandType"] == "MOVE_TO", two
+    default = build_fallback(FWD2_CONFIG)(gs, HOME, 4)
+    assert default[0]["commandType"] == "PRESS_BALL", "other teams keep the old fallback"
+    print("=== FALLBACK: only the closest forward presses ===")
 
 
 def test_recovery_position_stays_out_of_own_box():

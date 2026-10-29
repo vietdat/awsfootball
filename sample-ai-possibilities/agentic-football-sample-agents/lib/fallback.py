@@ -39,6 +39,8 @@ class FallbackConfig:
     press_distance: float = 20.0
     press_intensity: float = 0.7
     press_duration: int = 3
+    press_only_if_closest: bool = False
+    """If True, press only when no teammate is closer to the ball (one presser at a time)."""
 
     # Shoot threshold (distance to opp goal)
     shoot_threshold: float = 25.0
@@ -188,7 +190,13 @@ def build_fallback(cfg: FallbackConfig) -> Callable[[dict, int, int], list[dict]
 
         # --- Press if close to ball and opponent has it ---
         _, _, we_have_ball = get_possession_info(ball, players, team_id)
-        if not we_have_ball and dist(pos, ball_pos) < cfg.press_distance:
+        my_dist = dist(pos, ball_pos)
+        teammate_closer = cfg.press_only_if_closest and any(
+            dist(p.get("position", {"x": 0, "y": 0}), ball_pos) < my_dist
+            for p in players
+            if _is_my_team(p, team_id) and _player_idx(p) not in (my_player_id, 0)
+        )
+        if not we_have_ball and my_dist < cfg.press_distance and not teammate_closer:
             return [_cmd("PRESS_BALL", my_player_id, team_id,
                          {"intensity": cfg.press_intensity}, duration=cfg.press_duration)]
 
