@@ -6,7 +6,8 @@ Five AI agents that each control a single player in a 5v5 soccer match, built wi
 
 ## What's Different from the Balanced Team?
 
-Same positions and models, but each agent opts into three options of
+Same positions, with Nova 2 Lite selected for the tactically demanding Defender and
+Midfielder roles. Each agent opts into three options of
 `create_invoke_handler()` backed by `lib/tactics.py`:
 
 - **`stateless=True`** — the agent's conversation history is cleared every tick.
@@ -33,8 +34,8 @@ agents/
 ├── lib/            # Shared library (single source of truth, used by all teams)
 └── ai-team-strands-smart/
     ├── ai-gk/          # Goalkeeper  (player 0) — Nova Micro
-    ├── ai-def/         # Defender    (player 1) — Nova Lite
-    ├── ai-mid/         # Midfielder  (player 2) — Nova Pro
+    ├── ai-def/         # Defender    (player 1) — Nova 2 Lite
+    ├── ai-mid/         # Midfielder  (player 2) — Nova 2 Lite
     ├── ai-fwd1/        # Forward 1   (player 3) — Nova Micro
     ├── ai-fwd2/        # Forward 2   (player 4) — Nova Lite
     ├── deploy_all.py   # Build + deploy script
@@ -171,8 +172,8 @@ ALL_AGENTS = ["ai-gk", "ai-def", "ai-mid", "ai-fwd1", "ai-fwd2", "ai-myagent"]
 | Player ID | Position   | Default Model |
 |-----------|------------|---------------|
 | 0         | Goalkeeper | Nova Micro    |
-| 1         | Defender   | Nova Lite     |
-| 2         | Midfielder | Nova Pro      |
+| 1         | Defender   | Nova 2 Lite   |
+| 2         | Midfielder | Nova 2 Lite   |
 | 3         | Forward 1  | Nova Micro    |
 | 4         | Forward 2  | Nova Lite     |
 

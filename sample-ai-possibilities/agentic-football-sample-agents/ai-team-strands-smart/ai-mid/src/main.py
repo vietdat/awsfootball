@@ -1,6 +1,6 @@
 """
 AI Soccer Midfielder Agent — Controls ONLY player 2 (Midfielder).
-Uses Strands SDK + Amazon Nova Pro.
+Uses Strands SDK + Amazon Nova 2 Lite.
 """
 
 import os, sys; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib")); sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "lib"))
@@ -22,19 +22,24 @@ POSITION_LABEL = "MID"
 SYSTEM_PROMPT = f"""You are an AI soccer midfielder controlling ONLY player {MY_PLAYER_ID} (the Midfielder) in a 5v5 match. You receive game state each tick and must return commands for YOUR player only.
 
 ## Your Role — Midfielder
-- You are the link between defense and attack — distribute the ball wisely
-- PASS forward to forwards when they're in good positions, or back to the defender when under pressure
-- PRESS_BALL when the opponent has the ball in the middle third
-- INTERCEPT loose balls in the center of the pitch
-- MOVE_TO open space to offer passing options when a teammate has the ball
-- SHOOT from distance if you have a clear sight of goal (within ~25 units)
-- Balance attack and defense — track back when your team loses possession
-- Manage stamina carefully; you cover the most ground
+- You are the link between defense and attack, but you must always support the defense when your team loses possession
+- In defense, stay goal-side of the ball and recover toward the central lane so the Defender and goalkeeper are not left outnumbered
+- When an opponent controls the ball within 18 units, actively close them down with PRESS_BALL if you are the closest available teammate or no teammate is already pressing
+- Counter-press immediately after your team loses the ball when the new ball carrier is within 10 units; use INTERCEPT when a loose ball or passing lane can be won safely
+- If another teammate is already pressing, do not duplicate the chase: block the forward passing lane, MARK a nearby threat, or hold the central defensive position
+- When you have the ball, prioritize a pass to an unmarked forward (player 3 or 4). Prefer the Tactical analysis best pass when that receiver is free and the lane is safe
+- Use THROUGH for a forward running into clear space, GROUND for a safe direct option, and AERIAL only when opponents block a longer passing lane
+- After passing forward, immediately MOVE_TO a central supporting position 8-15 units behind the attack, ready to collect a clearance, rebound, or other second ball
+- When a second ball becomes loose near you, attack it proactively with INTERCEPT; if you win it and Tactical analysis shows a good shooting chance, SHOOT without unnecessary delay
+- MOVE_TO open space to remain available when a teammate has possession, while preserving a recovery route toward your own goal
+- Manage stamina carefully: sprint for counter-pressing, defensive recovery, or attacking a second ball, not for routine positioning
 
 ## Tactical Analysis
 Each tick ends with a "Tactical analysis" block of pre-computed numbers (shot quality and best aim, best pass,
-open space to receive, whether you are our closest player to the ball, match plan). Prefer its recommendations
-over your own estimates from raw coordinates. Follow the match plan: when trailing push forward, when leading protect.
+open space to receive, whether you are our closest player to the ball, most dangerous opponent, match plan).
+Prefer its recommendations over estimates from raw coordinates. When the opponent has the ball, press proactively
+if you are closest; otherwise protect the center and support the defender. When attacking, prefer an open forward,
+then move into support for the second ball. Follow the match plan without abandoning defensive recovery.
 
 ## Available Commands (commandType → parameters)
 
@@ -74,7 +79,7 @@ fallback_commands = build_fallback(MID_CONFIG)
 
 # --- Wire it up ---
 
-agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-pro-v1:0")
+agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-2-lite-v1:0")
 create_invoke_handler(
     app, agent, MY_PLAYER_ID, POSITION_LABEL, fallback_commands,
     fallback_cfg=MID_CONFIG,

@@ -1,6 +1,6 @@
 """
 AI Soccer Defender Agent — Controls ONLY player 1 (Defender).
-Uses Strands SDK + Amazon Nova Lite.
+Uses Strands SDK + Amazon Nova 2 Lite.
 """
 
 import os, sys; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib")); sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "lib"))
@@ -22,14 +22,20 @@ POSITION_LABEL = "DEF"
 SYSTEM_PROMPT = f"""You are an AI soccer defender controlling ONLY player {MY_PLAYER_ID} (the Defender) in a 5v5 match. You receive game state each tick and must return commands for YOUR player only.
 
 ## Your Role — Defender
-- Stay between the ball and your goal to shield the goalkeeper
+- Stay between the ball and your goal when your team does not have possession
 - MARK the most dangerous opponent (closest to your goal or carrying the ball)
 - INTERCEPT loose balls in your defensive third
-- PRESS_BALL when an opponent with the ball enters your zone
-- SLIDE_TACKLE as a last resort when an opponent threatens your goal and is close
-- When you win the ball, PASS to the midfielder or a forward — don't dribble upfield
-- Hold your defensive shape; don't chase the ball into the opponent's half
-- Conserve stamina for crucial defensive sprints
+- When you win the ball, first look for the progressive pass recommended by Tactical analysis
+- Treat the Midfielder (player 2) as tightly marked when an opponent is within 4 units of them. In that case, bypass midfield and proactively play a long AERIAL pass to the more open forward (player 3 or 4)
+- For a long pass, prefer the forward with more separation from opponents and a clear landing area; do not target a forward who is also tightly marked
+- If the Midfielder is tightly marked and both forwards are unavailable, keep possession by advancing into open space or use the safest available pass instead of forcing the long ball
+- If no safe progressive pass exists and the nearest opponent is more than 8 units away, carry the ball forward with MOVE_TO into open space
+- Join the attack only while space is available: advance into midfield, but do not go beyond x=25 for HOME or x=-25 for AWAY unless Tactical analysis recommends a high-quality shot
+- Stop advancing and PASS immediately when an opponent comes within 6 units, a teammate becomes open ahead, or advancing would expose the center in front of your goal
+- PRESS_BALL only when the opponent controls the ball and at least one condition is true: they enter your defensive third, you are the closest teammate to the ball within 18 units, or you can counter-press within 8 units immediately after losing possession
+- Do NOT press when a teammate is closer, the ball is in the opponent's half and outside your zone, your stamina is below 0.35, or pressing would leave a dangerous opponent unmarked. MARK or hold shape instead
+- Use SLIDE_TACKLE only as a last resort when the ball carrier is within 4 units and has a direct threat on goal
+- Conserve stamina: sprint only for an interception, emergency recovery, or a clear attacking lane
 
 ## Tactical Analysis
 Each tick ends with a "Tactical analysis" block of pre-computed numbers (best pass, most dangerous opponent,
@@ -74,7 +80,7 @@ fallback_commands = build_fallback(DEF_CONFIG)
 
 # --- Wire it up ---
 
-agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-lite-v1:0")
+agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-2-lite-v1:0")
 create_invoke_handler(
     app, agent, MY_PLAYER_ID, POSITION_LABEL, fallback_commands,
     fallback_cfg=DEF_CONFIG,
